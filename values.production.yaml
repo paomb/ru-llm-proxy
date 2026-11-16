@@ -1,0 +1,112 @@
+# Окружение production: исходные ресурсы из таблицы #59.
+# Нагрузочное подтверждение (этап 5 плана) может изменить количества и ресурсы.
+# Секреты и адреса внешних служб подставляются CD из переменных окружения.
+
+global:
+  imageRegistry: registry.example.com/llm/
+  proxy:
+    httpProxy: http://proxy.example.com:3128
+    httpsProxy: http://proxy.example.com:3128
+    noProxy: .example.com,10.0.0.0/8
+  external:
+    postgres:
+      litellm:
+        host: pg-litellm.prod.example.com
+        existingSecret: ru-llm-proxy-pg-litellm
+      codexLb:
+        host: pg-codexlb.prod.example.com
+        existingSecret: ru-llm-proxy-pg-codexlb
+    redis:
+      host: redis.prod.example.com
+      existingSecret: ru-llm-proxy-redis
+  secrets:
+    litellm:
+      existingSecret: ru-llm-proxy-litellm
+    codexLb:
+      existingSecret: ru-llm-proxy-codexlb
+
+# Vault Agent Injector: при enabled=true existingSecret игнорируется.
+# Секреты читаются из Vault KV v2 и инжектируются в /vault/secrets/*.env.
+  vault:
+    enabled: false             # переключить на true для использования Vault
+    role: ru-llm-proxy-prod
+    paths:
+      litellm: kv/ru-llm-proxy/prod/litellm
+      postgresLitellm: kv/ru-llm-proxy/prod/postgres-litellm
+      postgresCodexLb: kv/ru-llm-proxy/prod/postgres-codexlb
+      redis: kv/ru-llm-proxy/prod/redis
+      codexLb: kv/ru-llm-proxy/prod/codexlb
+    sharedPath: ""
+
+litellm:
+  replicaCount: 2              # минимум 2 обслуживающих Pod, один процесс на Pod
+  image: { tag: "" }
+  resources:
+    requests: { cpu: "2", memory: 4Gi }
+    limits:   { cpu: "2", memory: 4Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6             # пулы БД рассчитаны по maxReplicas
+    targetCPUUtilizationPercentage: 60
+  jobs:
+    enabled: true
+    replicaCount: 1
+    resources:
+      requests: { cpu: "1", memory: 4Gi }
+      limits:   { cpu: "1", memory: 4Gi }
+  config:
+    piiGuardrailMode: mask     # согласовать с владельцем: mask | block
+
+presidio-analyzer:
+  replicaCount: 4              # минимум 4 Pod (#59)
+  image: { tag: "" }
+  resources:
+    requests: { cpu: "4", memory: 8Gi }
+    limits:   { cpu: "4", memory: 8Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 16
+    targetCPUUtilizationPercentage: 70
+    scaleDownStabilizationWindowSeconds: 600
+
+ner-triton:
+  replicaCount: 2
+  image: { tag: "" }
+  resources:
+    requests: { cpu: "2", memory: 4Gi }
+    limits:   { cpu: "2", memory: 4Gi }
+
+codex-lb:
+  enabled: true
+  replicaCount: 3              # минимум три экземпляра (#59)
+  auth:
+    existingSecret: ru-llm-proxy-codexlb
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+istio:
+  enabled: true
+  gateway:
+    name: internal
+    namespace: istio-system
+  hosts:
+    - ru-llm-proxy.prod.example.com
+
+networkPolicies:
+  enabled: true
+  ingressNamespaceLabels:
+    kubernetes.io/metadata.name: istio-system
+  providerEgressCidrs:
+    - 0.0.0.0/0                # сузить до CIDR корпоративного прокси
+
+pdb:
+  enabled: true
+  maxUnavailable: 1
+
+topologySpread:
+  enabled: true

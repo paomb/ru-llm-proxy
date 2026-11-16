@@ -1,0 +1,201 @@
+# Дефолтные значения: функциональный профиль (минимальная установка для проверки).
+# Промышленные значения — values.production.yaml в корне репозитория.
+# Секретов здесь нет: только имена существующих Secret.
+
+global:
+  imageRegistry: ""            # например registry.example.com/llm
+  imagePullSecrets: []
+  clusterDomain: cluster.local
+  # Исходящие соединения к внешним провайдерам — через корпоративный прокси;
+  # внутренние сервисы кластера и корпоративные адреса — напрямую (no_proxy).
+  proxy:
+    httpProxy: ""              # например http://proxy.example.com:3128
+    httpsProxy: ""             # например http://proxy.example.com:3128
+    noProxy: ""                # дополнительные хосты через запятую; кластерные
+                               # суффиксы (.svc,.cluster.local) добавляются всегда
+  # Внешние отказоустойчивые хранилища (#59). Доступны всем subcharts через .Values.global.
+  external:
+    postgres:
+      litellm:
+        host: ""               # обязателен
+        port: 5432
+        database: litellm
+        existingSecret: ""     # ключи: username, password, url
+        sslmode: require
+      codexLb:
+        host: ""
+        port: 5432
+        database: codex_lb
+        existingSecret: ""
+        sslmode: require
+    redis:
+      host: ""                 # обязателен
+      port: 6379
+      existingSecret: ""       # ключ: password (опционально)
+      tls: false
+  # Секреты приложений (имена существующих Secret).
+  secrets:
+    litellm:
+      existingSecret: ""       # ключи: master-key, salt-key, zai-api-key, zai-api-key-2,
+                               # ui-username, ui-password, openai-api-key, anthropic-api-key,
+                               # codex-lb-api-key (расширенный состав)
+    codexLb:
+      existingSecret: ""       # официальный chart: ключи database-url, encryption-key
+
+  # HashiCorp Vault: альтернатива existingSecret.
+  # При vault.enabled=true секреты НЕ читаются из Kubernetes Secret, а инжектируются
+  # Vault Agent Injector в файлы /vault/secrets/*.env и подхватываются entrypoint.
+  # existingSecret при этом игнорируется.
+  vault:
+    enabled: false
+    # Роль Vault для Kubernetes auth (привязана к ServiceAccount подов).
+    role: ru-llm-proxy
+    # Пути в KV v2 (без /data/ — добавляется шаблоном).
+    paths:
+      litellm: kv/ru-llm-proxy/litellm          # master-key, salt-key, api keys...
+      postgresLitellm: kv/ru-llm-proxy/postgres-litellm  # url или username+password
+      postgresCodexLb: kv/ru-llm-proxy/postgres-codexlb
+      redis: kv/ru-llm-proxy/redis               # password
+      codexLb: kv/ru-llm-proxy/codexlb           # database-url, encryption-key
+    # Общие секреты контура (опционально): например корпоративные CA, shared keys.
+    sharedPath: ""               # например kv/shared/common
+    # Ресурсы Vault Agent sidecar/init container.
+    agentResources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits:   { cpu: 100m, memory: 128Mi }
+
+# === LiteLLM, клиентский трафик (#59: минимум 2 Pod, один процесс на Pod) ===
+litellm:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: ru-llm-proxy-litellm
+    tag: ""                    # обязателен; latest запрещён
+    digest: ""
+  resources:
+    requests: { cpu: "2", memory: 4Gi }
+    limits:   { cpu: "2", memory: 4Gi }
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6             # пулы БД/Redis рассчитаны по maxReplicas, не по текущему числу Pod
+    targetCPUUtilizationPercentage: 60   # память — ограничение, не сигнал HPA
+  jobs:
+    enabled: true              # LITELLM_JOB_ROLE=worker на отдельном Pod (подтверждено в v1.98.0)
+    replicaCount: 1
+    resources:
+      requests: { cpu: "1", memory: 4Gi }
+      limits:   { cpu: "1", memory: 4Gi }
+  config:
+    piiGuardrailMode: mask     # mask | block
+    piiGuardrailFailureMode: fail_closed   # fail_open только как осознанное исключение
+    piiMappingTtlSeconds: 3600
+    preEgressPolicyMode: block
+    finalPayloadLeakCheckMode: block
+    dictionarySubstitutionsEnabled: true
+    regulatedTopicPolicyMode: "off"
+    syntheticPiiAllowlistMode: "off"
+    analyzerTimeoutSeconds: 240
+    analyzerMaxConnections: 20
+    redisMaxConnections: 20
+    disableAdminUi: false
+  terminationGracePeriodSeconds: 60
+  preStopSleepSeconds: 10
+
+# === Presidio Analyzer (#59: минимум 4 Pod в production) ===
+presidio-analyzer:
+  enabled: true
+  replicaCount: 1              # production: 4+
+  image:
+    repository: ru-llm-proxy-analyzer
+    tag: ""
+    digest: ""
+  resources:
+    requests: { cpu: "4", memory: 8Gi }
+    limits:   { cpu: "4", memory: 8Gi }
+  autoscaling:
+    enabled: false
+    minReplicas: 4
+    maxReplicas: 16
+    targetCPUUtilizationPercentage: 70
+    scaleDownStabilizationWindowSeconds: 600   # уменьшение только после 10 минут стабильности
+  config:
+    workers: 1                 # один процесс на Pod
+    concurrencyLimit: 2
+    queueLimit: 32
+    queueTimeoutSeconds: 45
+    nerBatchSize: 4
+    tritonTimeoutSeconds: 60
+
+# === Triton / Tiny2 ONNX на CPU ===
+ner-triton:
+  enabled: true
+  replicaCount: 1              # production: 2+
+  image:
+    repository: ru-llm-proxy-ner-triton
+    tag: ""
+    digest: ""
+  resources:
+    requests: { cpu: "2", memory: 4Gi }
+    limits:   { cpu: "2", memory: 4Gi }
+  modelInstances: 2
+
+# === codex-lb: официальный chart (StatefulSet, session handoff, drain) ===
+codex-lb:
+  enabled: false               # расширенный состав
+  replicaCount: 3              # #59: минимум три экземпляра
+  image:
+    registry: ghcr.io
+    repository: soju06/codex-lb
+    tag: 1.24.0
+    digest: ""
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits:   { cpu: "1", memory: 1Gi }
+  terminationGracePeriodSeconds: 65   # >= shutdownDrainTimeoutSeconds + 32 (guard чарта)
+  config:
+    databaseMigrateOnStartup: false   # миграции — штатным Job чарта
+    shutdownDrainTimeoutSeconds: 30
+  autoscaling:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    create: true
+    maxUnavailable: 1
+  auth:
+    existingSecret: ""         # подставляется из secrets.codexLb.existingSecret в CD
+  postgresql:
+    enabled: false             # внешняя PostgreSQL
+  # Proxy-переменные для официального chart; заполняются из global.proxy в CD
+  # или через --set-json codex-lb.extraEnv. Внутренние адреса — в NO_PROXY.
+  extraEnv: []
+
+# === Сеть ===
+istio:
+  enabled: false
+  gateway:
+    name: ""
+    namespace: istio-system
+  hosts: []
+
+ingress:
+  enabled: false               # fallback при istio.enabled=false
+  className: nginx
+  annotations: {}
+  hosts: []
+  tls: []
+
+networkPolicies:
+  enabled: true                # default-deny + внутренние разрешения; адаптация deploy/kubernetes/egress
+  ingressNamespaceLabels: {}   # метки namespace ingress-контроллера для допуска к LiteLLM
+  providerEgressCidrs: []      # разрешённые внешние назначения LiteLLM/codex-lb (0.0.0.0/0 только осознанно)
+
+# === Размещение ===
+topologySpread:
+  enabled: true                # topologySpreadConstraints по kubernetes.io/hostname
+
+pdb:
+  enabled: true
+  maxUnavailable: 1

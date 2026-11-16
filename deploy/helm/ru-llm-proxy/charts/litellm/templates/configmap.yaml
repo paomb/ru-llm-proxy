@@ -1,0 +1,11 @@
+# Конфигурация LiteLLM перенесена из litellm-config.yaml без изменений моделей
+# и guardrails; секреты остаются os.environ/* ссылками.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm.fullname" . }}-config
+  labels:
+    {{- include "litellm.selectorLabels" . | nindent 4 }}
+data:
+  config.yaml: |
+{{- .Files.Get "files/litellm-config.yaml" | nindent 4 }}

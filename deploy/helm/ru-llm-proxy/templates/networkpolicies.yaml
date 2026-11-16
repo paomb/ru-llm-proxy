@@ -1,0 +1,113 @@
+{{- if .Values.networkPolicies.enabled }}
+# Default-deny для namespace; разрешения — отдельными политиками ниже.
+# Адаптация deploy/kubernetes/egress под архитектуру Tiny2/Triton:
+# Analyzer требует egress к Triton (в Compose — через Nginx:8000) и DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ru-llm-proxy.fullname" . }}-default-deny
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+# DNS для всех подов стека.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ru-llm-proxy.fullname" . }}-allow-dns
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# LiteLLM: вход только от ingress-контроллера; выход к Analyzer, Triton не нужен,
+# Redis, PostgreSQL, codex-lb, внешние провайдеры.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ru-llm-proxy.fullname" . }}-litellm
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: litellm
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    {{- if .Values.networkPolicies.ingressNamespaceLabels }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicies.ingressNamespaceLabels | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 4000 }
+    {{- else }}
+    - ports:
+        - { protocol: TCP, port: 4000 }
+    {{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: presidio-analyzer
+      ports:
+        - { protocol: TCP, port: 5001 }
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: codex-lb
+      ports:
+        - { protocol: TCP, port: 2455 }
+    - ports:
+        - { protocol: TCP, port: {{ .Values.global.external.redis.port }} }
+        - { protocol: TCP, port: {{ .Values.global.external.postgres.litellm.port }} }
+    {{- range .Values.networkPolicies.providerEgressCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . }}
+    {{- end }}
+---
+# Analyzer: вход только от LiteLLM; выход только к Triton. Интернет запрещён.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ru-llm-proxy.fullname" . }}-analyzer
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: presidio-analyzer
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: litellm
+      ports:
+        - { protocol: TCP, port: 5001 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ner-triton
+      ports:
+        - { protocol: TCP, port: 8000 }
+---
+# Triton: вход только от Analyzer; egress запрещён.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ru-llm-proxy.fullname" . }}-triton
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: ner-triton
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: presidio-analyzer
+      ports:
+        - { protocol: TCP, port: 8000 }
+{{- end }}

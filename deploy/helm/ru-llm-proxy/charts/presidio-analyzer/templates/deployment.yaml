@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "presidio-analyzer.fullname" . }}
+  labels:
+    {{- include "presidio-analyzer.selectorLabels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "presidio-analyzer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "presidio-analyzer.selectorLabels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "presidio-analyzer.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      containers:
+        - name: analyzer
+          image: {{ include "presidio-analyzer.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { containerPort: 5001, name: http }
+          env:
+            {{- include "ru-llm-proxy.proxyEnv" . | nindent 12 }}
+            - name: PRESIDIO_ANALYZER_WORKERS
+              value: {{ .Values.config.workers | quote }}
+            - name: PRESIDIO_ANALYZER_CONCURRENCY_LIMIT
+              value: {{ .Values.config.concurrencyLimit | quote }}
+            - name: PRESIDIO_ANALYZER_QUEUE_LIMIT
+              value: {{ .Values.config.queueLimit | quote }}
+            - name: PRESIDIO_ANALYZER_QUEUE_TIMEOUT_SECONDS
+              value: {{ .Values.config.queueTimeoutSeconds | quote }}
+            - name: PRESIDIO_ANALYZER_NER_BATCH_SIZE
+              value: {{ .Values.config.nerBatchSize | quote }}
+            - name: PRESIDIO_ANALYZER_TRITON_TIMEOUT_SECONDS
+              value: {{ .Values.config.tritonTimeoutSeconds | quote }}
+            - name: PRESIDIO_ANALYZER_TRITON_URL
+              value: {{ printf "http://%s-ner-triton:8000" .Release.Name | quote }}
+            - name: PRESIDIO_ANALYZER_BASE64_POLICY
+              value: content
+            - name: PRESIDIO_ANALYZER_DETECT_BARE_INN_BY_CHECKSUM
+              value: "true"
+            - name: PRESIDIO_ANALYZER_DETECT_PUBLIC_IPS
+              value: "true"
+          # Прогрев (токенизатор, spaCy) до включения в Service (#59).
+          startupProbe:
+            httpGet: { path: /api/v1/health, port: 5001 }
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: 5001 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /api/v1/health, port: 5001 }
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6    # не перезапускать при длинном анализе
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

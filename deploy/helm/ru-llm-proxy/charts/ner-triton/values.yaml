@@ -1,0 +1,20 @@
+replicaCount: 1
+image:
+  repository: ru-llm-proxy-ner-triton
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+service:
+  port: 8000
+
+resources:
+  requests: { cpu: "2", memory: 4Gi }
+  limits:   { cpu: "2", memory: 4Gi }
+
+modelInstances: 2
+terminationGracePeriodSeconds: 60
+global: {}
+
+topologySpread:
+  enabled: true

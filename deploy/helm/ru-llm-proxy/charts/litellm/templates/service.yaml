@@ -1,0 +1,13 @@
+# Service публикует только serving Pod; jobs Pod остаётся без клиентского трафика.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm.fullname" . }}
+  labels:
+    {{- include "litellm.selectorLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "litellm.selectorLabels" . | nindent 4 }}
+  ports:
+    - { port: 4000, targetPort: 4000, name: http }

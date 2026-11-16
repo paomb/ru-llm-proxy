@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ner-triton
+description: Triton Inference Server — закреплённый ONNX Tiny2 на CPU
+type: application
+version: 0.1.0
+appVersion: "0.7.0"

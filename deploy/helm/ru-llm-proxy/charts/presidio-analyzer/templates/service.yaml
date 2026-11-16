@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "presidio-analyzer.fullname" . }}
+  labels:
+    {{- include "presidio-analyzer.selectorLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "presidio-analyzer.selectorLabels" . | nindent 4 }}
+  ports:
+    - { port: 5001, targetPort: 5001, name: http }

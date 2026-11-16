@@ -1,0 +1,52 @@
+# Значения переопределяются из umbrella values.yaml (секция litellm).
+replicaCount: 2
+image:
+  repository: ru-llm-proxy-litellm
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+service:
+  port: 4000
+
+resources:
+  requests: { cpu: "2", memory: 4Gi }
+  limits:   { cpu: "2", memory: 4Gi }
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 60
+
+jobs:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: "1", memory: 4Gi }
+    limits:   { cpu: "1", memory: 4Gi }
+
+config:
+  piiGuardrailMode: mask
+  piiGuardrailFailureMode: fail_closed
+  piiMappingTtlSeconds: 3600
+  preEgressPolicyMode: block
+  finalPayloadLeakCheckMode: block
+  dictionarySubstitutionsEnabled: true
+  regulatedTopicPolicyMode: "off"
+  syntheticPiiAllowlistMode: "off"
+  analyzerTimeoutSeconds: 240
+  analyzerMaxConnections: 20
+  redisMaxConnections: 20
+  disableAdminUi: false
+
+terminationGracePeriodSeconds: 60
+preStopSleepSeconds: 10
+
+# Заполняется umbrella через subchart values (см. шаблоны).
+external: {}
+secrets: {}
+global: {}
+
+topologySpread:
+  enabled: true

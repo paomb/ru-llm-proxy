@@ -1,0 +1,23 @@
+apiVersion: v2
+name: ru-llm-proxy
+description: >-
+  Защищённый LLM-шлюз: LiteLLM + PII Guardrail + Presidio Analyzer + Tiny2/Triton,
+  с опциональным codex-lb (пул ChatGPT OAuth-подписок). Umbrella chart.
+type: application
+version: 0.1.0
+appVersion: "0.7.0"
+
+dependencies:
+  - name: litellm
+    version: 0.1.0
+    condition: litellm.enabled
+  - name: presidio-analyzer
+    version: 0.1.0
+    condition: presidio-analyzer.enabled
+  - name: ner-triton
+    version: 0.1.0
+    condition: ner-triton.enabled
+  - name: codex-lb
+    version: 1.24.0
+    repository: oci://ghcr.io/soju06/charts
+    condition: codex-lb.enabled

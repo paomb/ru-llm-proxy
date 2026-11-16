@@ -1,0 +1,17 @@
+{{- if .Values.pdb.enabled }}
+{{- range $component := list "litellm" "presidio-analyzer" "ner-triton" }}
+{{- if index $.Values $component "enabled" }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ru-llm-proxy.fullname" $ }}-{{ $component }}
+spec:
+  maxUnavailable: {{ $.Values.pdb.maxUnavailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{ $component }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,34 @@
+{{- if .Values.autoscaling.enabled }}
+# Масштабирование Analyzer: CPU + уменьшение только после 10 минут стабильности
+# (#59). Метрики очереди (ru_presidio_analyzer_capacity_*) подключаются через
+# Prometheus adapter на уровне контура — см. docs/kubernetes-sizing.md.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "presidio-analyzer.fullname" . }}
+  labels:
+    {{- include "presidio-analyzer.selectorLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "presidio-analyzer.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDownStabilizationWindowSeconds }}
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 0
+{{- end }}

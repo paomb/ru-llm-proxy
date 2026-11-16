@@ -1,0 +1,64 @@
+{{- if .Values.jobs.enabled }}
+# Фоновые задания LiteLLM: один Pod, LITELLM_JOB_ROLE=worker, без клиентского
+# трафика (Service указывает только на serving Pod). Подтверждено в v1.98.0.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm.fullname" . }}-jobs
+  labels:
+    {{- include "litellm.jobsSelectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.jobs.replicaCount }}
+  strategy:
+    type: Recreate    # единственный владелец single-owner заданий
+  selector:
+    matchLabels:
+      {{- include "litellm.jobsSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm.jobsSelectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ .Files.Get "files/litellm-config.yaml" | sha256sum }}
+        {{- include "ru-llm-proxy.vaultAnnotations" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: litellm
+          image: {{ include "litellm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "/app/litellm_guardrails/entrypoint.sh"]
+          args: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+          ports:
+            - { containerPort: 4000, name: http }
+          env:
+            {{- include "litellm.commonEnv" . | nindent 12 }}
+            - name: LITELLM_JOB_ROLE
+              value: worker
+          startupProbe:
+            httpGet: { path: /health/liveliness, port: 4000 }
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /health/readiness, port: 4000 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health/liveliness, port: 4000 }
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.jobs.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /app/config.yaml, subPath: config.yaml, readOnly: true }
+            {{- include "ru-llm-proxy.vaultTokenMount" . | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm.fullname" . }}-config
+        {{- include "ru-llm-proxy.vaultTokenVolume" . | nindent 8 }}
+{{- end }}

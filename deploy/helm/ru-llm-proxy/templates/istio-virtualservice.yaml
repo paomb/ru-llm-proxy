@@ -1,0 +1,34 @@
+{{- if .Values.istio.enabled }}
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ include "ru-llm-proxy.fullname" . }}
+  labels:
+    {{- include "ru-llm-proxy.labels" . | nindent 4 }}
+spec:
+  hosts:
+    {{- toYaml .Values.istio.hosts | nindent 4 }}
+  gateways:
+    - "{{ .Values.istio.gateway.namespace }}/{{ .Values.istio.gateway.name }}"
+  http:
+    {{- if (index .Values "codex-lb" "enabled") }}
+    - name: codex-lb
+      match:
+        - uri:
+            prefix: /codex-lb/
+      route:
+        - destination:
+            host: {{ .Release.Name }}-codex-lb
+            port:
+              number: 2455
+    {{- end }}
+    - name: litellm
+      match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: {{ .Release.Name }}-litellm
+            port:
+              number: 4000
+{{- end }}

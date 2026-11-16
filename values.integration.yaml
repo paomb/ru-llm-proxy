@@ -1,0 +1,76 @@
+# Окружение integration: функциональная проверка в Kubernetes.
+# Секреты и адреса внешних служб подставляются CD из переменных окружения.
+
+global:
+  imageRegistry: registry.example.com/llm/
+  proxy:
+    httpProxy: http://proxy.example.com:3128
+    httpsProxy: http://proxy.example.com:3128
+    noProxy: .example.com,10.0.0.0/8
+  external:
+    postgres:
+      litellm:
+        host: pg-litellm.int.example.com
+        existingSecret: ru-llm-proxy-pg-litellm
+      codexLb:
+        host: pg-codexlb.int.example.com
+        existingSecret: ru-llm-proxy-pg-codexlb
+    redis:
+      host: redis.int.example.com
+      existingSecret: ru-llm-proxy-redis
+  secrets:
+    litellm:
+      existingSecret: ru-llm-proxy-litellm
+    codexLb:
+      existingSecret: ru-llm-proxy-codexlb
+
+# Vault Agent Injector: при enabled=true existingSecret игнорируется.
+# Секреты читаются из Vault KV v2 и инжектируются в /vault/secrets/*.env.
+  vault:
+    enabled: false             # переключить на true для использования Vault
+    role: ru-llm-proxy-int
+    paths:
+      litellm: kv/ru-llm-proxy/int/litellm
+      postgresLitellm: kv/ru-llm-proxy/int/postgres-litellm
+      postgresCodexLb: kv/ru-llm-proxy/int/postgres-codexlb
+      redis: kv/ru-llm-proxy/int/redis
+      codexLb: kv/ru-llm-proxy/int/codexlb
+    sharedPath: ""
+
+litellm:
+  replicaCount: 2
+  image: { tag: "" }           # --set litellm.image.tag из CD
+  config:
+    piiGuardrailMode: mask
+
+presidio-analyzer:
+  replicaCount: 2
+  image: { tag: "" }
+  resources:
+    requests: { cpu: "2", memory: 4Gi }
+    limits:   { cpu: "2", memory: 4Gi }
+
+ner-triton:
+  replicaCount: 1
+  image: { tag: "" }
+  resources:
+    requests: { cpu: "1", memory: 2Gi }
+    limits:   { cpu: "1", memory: 2Gi }
+
+codex-lb:
+  enabled: false
+
+istio:
+  enabled: true
+  gateway:
+    name: internal
+    namespace: istio-system
+  hosts:
+    - ru-llm-proxy.int.example.com
+
+networkPolicies:
+  enabled: true
+  ingressNamespaceLabels:
+    kubernetes.io/metadata.name: istio-system
+  providerEgressCidrs:
+    - 0.0.0.0/0                # внешние провайдеры через прокси; сузить до CIDR прокси при выводе

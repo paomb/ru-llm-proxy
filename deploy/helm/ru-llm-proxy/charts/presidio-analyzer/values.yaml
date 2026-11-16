@@ -1,0 +1,34 @@
+replicaCount: 1
+image:
+  repository: ru-llm-proxy-analyzer
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+service:
+  port: 5001
+
+resources:
+  requests: { cpu: "4", memory: 8Gi }
+  limits:   { cpu: "4", memory: 8Gi }
+
+autoscaling:
+  enabled: false
+  minReplicas: 4
+  maxReplicas: 16
+  targetCPUUtilizationPercentage: 70
+  scaleDownStabilizationWindowSeconds: 600
+
+config:
+  workers: 1
+  concurrencyLimit: 2
+  queueLimit: 32
+  queueTimeoutSeconds: 45
+  nerBatchSize: 4
+  tritonTimeoutSeconds: 60
+
+terminationGracePeriodSeconds: 60
+global: {}
+
+topologySpread:
+  enabled: true

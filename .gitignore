@@ -71,3 +71,7 @@ cache/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Helm
+deploy/helm/*/charts/*.tgz
+deploy/helm/*/Chart.lock

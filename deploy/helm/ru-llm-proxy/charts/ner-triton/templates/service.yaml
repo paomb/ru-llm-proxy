@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ner-triton.fullname" . }}
+  labels:
+    {{- include "ner-triton.selectorLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ner-triton.selectorLabels" . | nindent 4 }}
+  ports:
+    - { port: 8000, targetPort: 8000, name: http }
+    - { port: 8002, targetPort: 8002, name: metrics }
